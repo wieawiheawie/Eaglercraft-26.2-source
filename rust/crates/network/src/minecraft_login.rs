@@ -273,7 +273,6 @@ impl MinecraftLoginSession {
         let payload = &body[packet_id_len..];
 
         match self.state {
-            LoginState::AwaitingLoginSuccess | LoginState::AwaitingAuthentication => unreachable!(),
             LoginState::AwaitingLogin => self.fail(LoginError::InvalidPacket("unexpected initial state")),
             LoginState::Authenticating | LoginState::AwaitingLoginSuccess => {
                 match packet_id {
@@ -514,7 +513,7 @@ impl MinecraftLoginSession {
             }
             return Ok(frame[prefix_length..].to_vec());
         }
-        if declared_size as usize < threshold {
+        if (declared_size as usize) < threshold {
             return Err(LoginError::InvalidPacket("packet compressed below server threshold"));
         }
         let mut decoder = ZlibDecoder::new(&frame[prefix_length..]);
