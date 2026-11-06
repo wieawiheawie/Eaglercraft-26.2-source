@@ -1,16 +1,21 @@
 use std::{cell::RefCell, rc::{Rc, Weak}};
 
 use js_sys::{ArrayBuffer, Uint8Array};
-use eagler_network::{parse_wisp_uri, WispSession, WispState};
+use eagler_network::{
+    parse_wisp_uri, MinecraftStatusProbe, StatusProbeState, WispSession, WispState, WispTarget,
+};
 use wasm_bindgen::{closure::Closure, prelude::*, JsCast};
 use web_sys::{BinaryType, CloseEvent, Event, MessageEvent, WebSocket};
 
 struct ConnectionInner {
     socket: WebSocket,
+    target: WispTarget,
     session: WispSession,
     opened: bool,
     websocket_closed: bool,
     failure: Option<String>,
+    status_probe: Option<MinecraftStatusProbe>,
+    probe_output: Vec<u8>,
 }
 
 #[wasm_bindgen]
@@ -25,8 +30,7 @@ pub struct BrowserWispConnection {
 #[wasm_bindgen]
 impl BrowserWispConnection {
     /// Opens an independent WebSocket to the Wisp relay described by an
-    /// eagler-wisp URI. TCP stream establishment completes asynchronously
-    /// after the relay sends its Wisp v1 greeting.
+    /// eagler-wisp URI. The TCP stream becomes ready after the Wisp v1 greeting.
     #[wasm_bindgen(constructor)]
     pub fn new(uri: &str) -> Result<BrowserWispConnection, JsValue> {
         let target = parse_wisp_uri(uri)
@@ -36,11 +40,14 @@ impl BrowserWispConnection {
 
         let inner = Rc::new(RefCell::new(ConnectionInner {
             socket: socket.clone(),
-            session: WispSession::new(target.host, target.port)
+            session: WispSession::new(target.host.clone(), target.port)
                 .map_err(|error| JsValue::from_str(&format!("Invalid Wisp target: {error:?}")))?,
+            target,
             opened: false,
             websocket_closed: false,
             failure: None,
+            status_probe: None,
+            probe_output: Vec::with_capacity(64 * 1024),
         }));
 
         let weak: Weak<RefCell<ConnectionInner>> = Rc::downgrade(&inner);
@@ -64,6 +71,8 @@ impl BrowserWispConnection {
                 let _ = inner.socket.close();
                 return;
             };
+            // One linear copy from the browser's received ArrayBuffer into the
+            // reusable Rust stream buffer; no per-byte JavaScript Array objects.
             let bytes = Uint8Array::new(&buffer).to_vec();
             let mut inner = inner.borrow_mut();
             if let Err(error) = inner.session.receive_packet(&bytes) {
@@ -78,7 +87,8 @@ impl BrowserWispConnection {
         let weak = Rc::downgrade(&inner);
         let on_error = Closure::wrap(Box::new(move |_event: Event| {
             if let Some(inner) = weak.upgrade() {
-                inner.borrow_mut().failure = Some("Wisp WebSocket relay reported a transport error".to_owned());
+                inner.borrow_mut().failure =
+                    Some("Wisp WebSocket relay reported a transport error".to_owned());
             }
         }) as Box<dyn FnMut(Event)>);
         socket.set_onerror(Some(on_error.as_ref().unchecked_ref()));
@@ -135,14 +145,16 @@ impl BrowserWispConnection {
         self.inner.borrow().socket.buffered_amount()
     }
 
-    /// Sends raw Minecraft TCP-stream bytes. The Wisp codec applies its credit
-    /// window and retains at most four MiB of queued data.
+    /// Sends raw Minecraft TCP-stream bytes through Wisp's credit-controlled
+    /// stream. Waiting data is bounded to four MiB.
     pub fn send_tcp(&self, bytes: &[u8]) -> Result<(), JsValue> {
         let mut inner = self.inner.borrow_mut();
         if let Some(error) = &inner.failure {
             return Err(JsValue::from_str(error));
         }
-        inner.session.send_tcp(bytes)
+        inner
+            .session
+            .send_tcp(bytes)
             .map_err(|error| JsValue::from_str(&format!("Wisp send failed: {error:?}")))?;
         flush_outbound(&mut inner);
         Ok(())
@@ -151,6 +163,83 @@ impl BrowserWispConnection {
     /// Reads raw TCP bytes into a caller-owned reusable buffer.
     pub fn read_tcp(&self, destination: &mut [u8]) -> usize {
         self.inner.borrow_mut().session.read_tcp(destination)
+    }
+
+    /// Begins a normal Minecraft 26.2 status handshake over this TCP stream.
+    /// The server must be a Java-protocol endpoint reachable through the relay.
+    pub fn begin_status_query(&self) -> Result<(), JsValue> {
+        let mut inner = self.inner.borrow_mut();
+        if inner.session.state() != WispState::Ready {
+            return Err(JsValue::from_str("Wisp TCP stream is not ready yet"));
+        }
+        if inner.status_probe.is_some() {
+            return Err(JsValue::from_str("A Minecraft status query is already active"));
+        }
+
+        let nonce = js_sys::Date::now() as i64;
+        let mut probe = MinecraftStatusProbe::new(&inner.target.host, inner.target.port, nonce)
+            .map_err(|error| JsValue::from_str(&format!("Could not create Minecraft handshake: {error:?}")))?;
+        let ConnectionInner {
+            session,
+            probe_output,
+            status_probe,
+            ..
+        } = &mut *inner;
+        probe.take_output(probe_output);
+        session
+            .send_tcp(probe_output)
+            .map_err(|error| JsValue::from_str(&format!("Could not send Minecraft handshake: {error:?}")))?;
+        *status_probe = Some(probe);
+        flush_outbound(&mut inner);
+        Ok(())
+    }
+
+    /// Polls the TCP stream, advances the status handshake, and sends the ping.
+    /// Returns the server's JSON status only after the ping nonce is verified.
+    pub fn poll_status(&self) -> Result<Option<String>, JsValue> {
+        let mut inner = self.inner.borrow_mut();
+        if let Some(error) = &inner.failure {
+            return Err(JsValue::from_str(error));
+        }
+        let mut scratch = [0_u8; 8192];
+        loop {
+            let count = inner.session.read_tcp(&mut scratch);
+            if count == 0 {
+                break;
+            }
+            let probe = inner
+                .status_probe
+                .as_mut()
+                .ok_or_else(|| JsValue::from_str("Start the Minecraft status query first"))?;
+            probe
+                .receive_tcp(&scratch[..count])
+                .map_err(|error| JsValue::from_str(&format!("Minecraft status protocol error: {error:?}")))?;
+        }
+
+        let ConnectionInner {
+            session,
+            probe_output,
+            status_probe,
+            ..
+        } = &mut *inner;
+        probe_output.clear();
+        let Some(probe) = status_probe.as_mut() else {
+            return Err(JsValue::from_str("Start the Minecraft status query first"));
+        };
+        probe.take_output(probe_output);
+        if !probe_output.is_empty() {
+            session
+                .send_tcp(probe_output)
+                .map_err(|error| JsValue::from_str(&format!("Could not send Minecraft status ping: {error:?}")))?;
+        }
+        let complete = probe.state() == StatusProbeState::Complete;
+        let status = if complete {
+            probe.status_json().map(str::to_owned)
+        } else {
+            None
+        };
+        flush_outbound(&mut inner);
+        Ok(status)
     }
 
     pub fn close(&self) {
@@ -173,8 +262,6 @@ impl Drop for BrowserWispConnection {
         inner.socket.set_onclose(None);
         let _ = inner.socket.close();
         inner.websocket_closed = true;
-        // Explicitly touch the callback fields so their lifetime is clear:
-        // they are kept alive for exactly as long as this connection exists.
         let _ = (
             &self.on_open,
             &self.on_message,
