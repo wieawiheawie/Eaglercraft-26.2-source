@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/game-core",
+    "crates/world",
+    "crates/renderer",
+    "crates/mod-api",
+    "crates/mod-runtime",
+    "crates/client-web",
+]
+
+[workspace.package]
+edition = "2024"
+license = "All-Rights-Reserved"
+rust-version = "1.85"
+
+[workspace.dependencies]
+eagler-game-core = { path = "crates/game-core" }
+eagler-world = { path = "crates/world" }
+eagler-renderer = { path = "crates/renderer" }
+eagler-mod-api = { path = "crates/mod-api" }
+eagler-mod-runtime = { path = "crates/mod-runtime" }
+
+[profile.dev]
+opt-level = 1
+debug = 0
+incremental = true
+codegen-units = 16
+
+[profile.release]
+opt-level = 2
+debug = 0
+strip = true
+lto = false
+codegen-units = 16
+panic = "abort"
+
+[profile.test]
+opt-level = 1
+debug = 0

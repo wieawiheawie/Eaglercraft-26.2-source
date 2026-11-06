@@ -1,0 +1,5 @@
+[build]
+jobs = 2
+
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "debuginfo=0"]

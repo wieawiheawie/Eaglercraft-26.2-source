@@ -1,0 +1,16 @@
+[package]
+name = "eagler-client-web"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+eagler-game-core.workspace = true
+eagler-world.workspace = true
+eagler-renderer.workspace = true
+eagler-mod-api.workspace = true
+eagler-mod-runtime.workspace = true

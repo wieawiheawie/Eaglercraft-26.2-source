@@ -1,0 +1,55 @@
+name: Rust browser client
+
+on:
+  push:
+    branches:
+      - rust/full-wasm-rewrite
+    paths:
+      - "rust/**"
+      - ".github/workflows/rust-client.yml"
+  pull_request:
+    paths:
+      - "rust/**"
+      - ".github/workflows/rust-client.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-client-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-wasm:
+    name: Test and build Rust/Wasm client (8 GiB gate)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_INCREMENTAL: 0
+      BUILD_TIME_LIMIT_SECONDS: 1200
+      BUILD_MEMORY_LIMIT_MIB: 7168
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Native tests
+        run: cargo test --workspace --locked
+      - name: Build browser Wasm within memory/time budget
+        run: ./scripts/measure-build.sh cargo build --locked --release --target wasm32-unknown-unknown -p eagler-client-web
+      - name: Upload initial browser module
+        uses: actions/upload-artifact@v4
+        with:
+          name: eagler-rust-client-wasm
+          path: rust/target/wasm32-unknown-unknown/release/eagler_client_web.wasm
+          if-no-files-found: error
