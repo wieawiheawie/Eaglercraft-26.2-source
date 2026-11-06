@@ -1,3 +1,4 @@
+use eagler_assets::TextureAtlas;
 use js_sys::Uint8Array;
 use web_sys::HtmlCanvasElement;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
@@ -12,6 +13,14 @@ pub struct GpuRenderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     backend_name: String,
+    texture_atlases: Vec<GpuTextureAtlas>,
+}
+
+struct GpuTextureAtlas {
+    _texture: wgpu::Texture,
+    _view: wgpu::TextureView,
+    width: u32,
+    height: u32,
 }
 
 impl GpuRenderer {
@@ -73,6 +82,7 @@ impl GpuRenderer {
             queue,
             config,
             backend_name: format!("{:?}", adapter_info.backend),
+            texture_atlases: Vec::new(),
         })
     }
 
@@ -122,6 +132,72 @@ impl GpuRenderer {
 
         #[cfg(not(target_arch = "wasm32"))]
         self.queue.write_buffer(target, offset, bytes);
+    }
+
+    /// Uploads an RGBA8 atlas into GPU texture memory and retains its view for
+    /// the lifetime of this renderer. Queue::write_texture accepts tightly
+    /// packed rows, so no 256-byte row padding or JS Array serialization is
+    /// required for this path.
+    pub fn upload_texture_atlas(&mut self, atlas: &TextureAtlas) -> Result<(), String> {
+        let expected = (atlas.width as usize)
+            .checked_mul(atlas.height as usize)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| "Texture atlas dimensions overflow".to_owned())?;
+        if atlas.width == 0 || atlas.height == 0 || atlas.pixels.len() != expected {
+            return Err("Texture atlas has invalid RGBA8 dimensions".to_owned());
+        }
+
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Minecraft resource texture atlas"),
+            size: wgpu::Extent3d {
+                width: atlas.width,
+                height: atlas.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &atlas.pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(atlas.width * 4),
+                rows_per_image: Some(atlas.height),
+            },
+            wgpu::Extent3d {
+                width: atlas.width,
+                height: atlas.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.texture_atlases.push(GpuTextureAtlas {
+            _texture: texture,
+            _view: view,
+            width: atlas.width,
+            height: atlas.height,
+        });
+        Ok(())
+    }
+
+    pub fn texture_atlas_count(&self) -> usize {
+        self.texture_atlases.len()
+    }
+
+    pub fn texture_atlas_dimensions(&self, index: usize) -> Option<[u32; 2]> {
+        self.texture_atlases
+            .get(index)
+            .map(|atlas| [atlas.width, atlas.height])
     }
 
     /// Acquires, clears and presents one frame. World mesh draw submission is

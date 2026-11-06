@@ -18,4 +18,5 @@ wasm-bindgen \
   --out-dir dist/pkg \
   --out-name eagler_client_web
 cp web/index.html dist/index.html
+./scripts/copy-game-assets.sh dist
 echo "Rust browser package written to $root/dist"

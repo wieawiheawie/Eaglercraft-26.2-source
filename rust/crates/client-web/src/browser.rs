@@ -5,6 +5,7 @@ use std::{
 
 use eagler_network::build_wisp_uri;
 use eagler_renderer::GpuRenderer;
+use crate::assets_browser::load_starter_texture_atlas;
 use wasm_bindgen::{closure::Closure, prelude::*, JsCast};
 use web_sys::{
     HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent,
@@ -39,11 +40,14 @@ pub async fn start(canvas_id: &str) -> Result<(), JsValue> {
         .dyn_into::<HtmlCanvasElement>()
         .map_err(|_| JsValue::from_str("Game canvas element is not a canvas"))?;
 
-    let renderer = Rc::new(RefCell::new(
-        GpuRenderer::new(canvas.clone())
-            .await
-            .map_err(|message| JsValue::from_str(&message))?,
-    ));
+    let mut gpu_renderer = GpuRenderer::new(canvas.clone())
+        .await
+        .map_err(|message| JsValue::from_str(&message))?;
+    let loaded_textures = load_starter_texture_atlas(&mut gpu_renderer).await?;
+    web_sys::console::info_1(&JsValue::from_str(&format!(
+        "Loaded {loaded_textures} Minecraft textures into the Rust GPU atlas."
+    )));
+    let renderer = Rc::new(RefCell::new(gpu_renderer));
     let simulation = Rc::new(RefCell::new(
         GameSimulation::new().map_err(|message| JsValue::from_str(&message))?,
     ));

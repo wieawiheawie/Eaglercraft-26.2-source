@@ -20,7 +20,7 @@ cargo build --release --target wasm32-unknown-unknown -p eagler-client-web
 ./scripts/build-web.sh
 ```
 
-`build-web.sh` also requires the `wasm-bindgen` CLI version matching the locked `wasm-bindgen` crate. The output is a static multi-file browser site under `dist/`.
+`build-web.sh` also requires the `wasm-bindgen` CLI version matching the locked `wasm-bindgen` crate. The output is a static multi-file browser site under `dist/`, including the checked-in Minecraft resource assets and data packs copied from `game/src/main/resources/`.
 
 The CI browser build is limited to 20 minutes and records peak resident memory. Passing the workspace tests alone does not mean the Minecraft port is complete.
 
@@ -30,4 +30,4 @@ New game behavior belongs in Rust crates. Existing Java code is retained as a te
 
 ## Current milestone
 
-The workspace contains a tested block registry, sparse world/chunk storage, CPU face-culling mesher, versioned mod manifests, and a fuel/memory-limited Wasm mod runtime. The browser GPU shell is now being wired up. Full gameplay, assets, save compatibility and networking are still under port.
+The workspace contains a tested block registry, sparse world/chunk storage, CPU face-culling mesher, versioned mod manifests, a fuel/memory-limited Wasm mod runtime, a Wisp v1 TCP transport, and a Minecraft 26.2 status ping. The browser build decodes a starter set of the repository's real Minecraft PNG textures in Rust and uploads them to a GPU atlas. Full gameplay and multiplayer login parity are still under port.

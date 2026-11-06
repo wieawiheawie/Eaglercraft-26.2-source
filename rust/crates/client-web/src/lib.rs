@@ -10,3 +10,6 @@ mod wisp_browser;
 pub use wisp_browser::BrowserWispConnection;
 
 mod game;
+
+#[cfg(target_arch = "wasm32")]
+mod assets_browser;
