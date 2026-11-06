@@ -167,6 +167,7 @@ pub struct WispSession {
     pending: VecDeque<Vec<u8>>,
     pending_bytes: usize,
     outbound: VecDeque<Vec<u8>>,
+    outbound_pool: Vec<Vec<u8>>,
     inbound: Vec<u8>,
     inbound_cursor: usize,
     failure: Option<WispError>,
@@ -186,6 +187,7 @@ impl WispSession {
             pending: VecDeque::new(),
             pending_bytes: 0,
             outbound: VecDeque::new(),
+            outbound_pool: Vec::with_capacity(8),
             inbound: Vec::with_capacity(64 * 1024),
             inbound_cursor: 0,
             failure: None,
@@ -224,7 +226,7 @@ impl WispSession {
             }
             self.credits = u64::from(read_u32_le(packet, 5));
             let hostname = self.host.as_bytes();
-            let mut open = Vec::with_capacity(HEADER_LEN + 3 + hostname.len());
+            let mut open = self.take_packet_buffer(HEADER_LEN + 3 + hostname.len());
             open.push(1);
             open.extend_from_slice(&1_u32.to_le_bytes());
             open.push(1); // TCP
@@ -278,7 +280,7 @@ impl WispSession {
         let mut offset = 0;
         while offset < bytes.len() {
             let length = (bytes.len() - offset).min(MAX_PAYLOAD);
-            let mut packet = Vec::with_capacity(HEADER_LEN + length);
+            let mut packet = self.take_packet_buffer(HEADER_LEN + length);
             packet.push(2);
             packet.extend_from_slice(&1_u32.to_le_bytes());
             packet.extend_from_slice(&bytes[offset..offset + length]);
@@ -318,12 +320,30 @@ impl WispSession {
         self.outbound.pop_front()
     }
 
+    /// Returns a packet buffer after WebSocket.send has synchronously copied it.
+    /// A small pool avoids repeated heap allocations for the common relay frames.
+    pub fn recycle_outbound(&mut self, mut packet: Vec<u8>) {
+        packet.clear();
+        if self.outbound_pool.len() < 8 {
+            self.outbound_pool.push(packet);
+        }
+    }
+
+    fn take_packet_buffer(&mut self, capacity: usize) -> Vec<u8> {
+        let mut packet = self.outbound_pool.pop().unwrap_or_default();
+        packet.clear();
+        if packet.capacity() < capacity {
+            packet.reserve(capacity - packet.capacity());
+        }
+        packet
+    }
+
     pub fn close(&mut self) {
         if self.state == WispState::Closed || self.state == WispState::Failed {
             return;
         }
         if self.state == WispState::Ready {
-            let mut packet = Vec::with_capacity(6);
+            let mut packet = self.take_packet_buffer(6);
             packet.push(4);
             packet.extend_from_slice(&1_u32.to_le_bytes());
             packet.push(2);
