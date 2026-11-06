@@ -107,18 +107,6 @@ impl GameSimulation {
         self.registry.id(key)
     }
 
-    pub fn world(&self) -> &World {
-        &self.world
-    }
-
-    pub fn registry(&self) -> &BlockRegistry {
-        &self.registry
-    }
-
-    pub fn block_id(&self, key: &str) -> Option<BlockId> {
-        self.registry.id(key)
-    }
-
     pub fn tick_index(&self) -> u64 {
         self.clock.tick_index()
     }
