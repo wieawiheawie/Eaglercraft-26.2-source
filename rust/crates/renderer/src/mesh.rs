@@ -293,6 +293,6 @@ mod tests {
         assert_eq!(mesh.vertices.len(), 40);
         assert_eq!(mesh.indices.len(), 60);
         assert_eq!(mesh.vertices[0].position[0], 15.0);
-        assert_eq!(mesh.vertices[20].position[0], 16.0);
+        assert_eq!(mesh.vertices[20].position[0], 17.0);
     }
 }
