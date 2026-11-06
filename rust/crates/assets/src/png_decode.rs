@@ -33,11 +33,11 @@ pub fn validate_texture_dimensions(width: u32, height: u32) -> Result<(), PngDec
 }
 
 pub fn decode_png_rgba(bytes: &[u8]) -> Result<DecodedTexture, PngDecodeError> {
-    let decoder = png::Decoder::new(Cursor::new(bytes));
+    let mut decoder = png::Decoder::new(Cursor::new(bytes));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder
         .read_info()
         .map_err(|error| PngDecodeError::InvalidPng(error.to_string()))?;
-    reader.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
 
     let mut frame = vec![0; reader.output_buffer_size()];
     let info = reader

@@ -185,7 +185,7 @@ mod tests {
 
         store.insert(key.clone(), vec![4, 5]).unwrap();
         assert_eq!(store.total_bytes(), 2);
-        assert_eq!(&*store.get(&key).unwrap(), &[4, 5]);
+        assert_eq!(&**store.get(&key).unwrap(), &[4, 5]);
     }
 
     #[test]
