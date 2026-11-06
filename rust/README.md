@@ -6,19 +6,23 @@ This is the new Rust-owned browser client. It is deliberately isolated from the 
 
 - Rust stable via rustup
 - `wasm32-unknown-unknown` target (installed by `rust-toolchain.toml`)
-- 8 GiB RAM is a hard ceiling; smaller builders are preferred when the measured build fits.
-- Two Cargo jobs by default to limit peak compiler memory.
+- The browser build uses at most two Cargo jobs by default.
+- 8 GiB RAM is an absolute ceiling; smaller builders are preferred when the measured build fits.
+- The measured CI gate rejects builds above 7 GiB maximum resident set or 20 minutes.
 
 ## Commands
 
 From this directory:
 
 ```sh
-cargo test --workspace
+cargo test --workspace --locked
 cargo build --release --target wasm32-unknown-unknown -p eagler-client-web
+./scripts/build-web.sh
 ```
 
-The CI browser build is limited to 20 minutes and records peak resident memory. The 7 GiB process-memory gate reserves headroom for the operating system. Passing the workspace tests alone does not mean the Minecraft port is complete.
+`build-web.sh` also requires the `wasm-bindgen` CLI version matching the locked `wasm-bindgen` crate. The output is a static multi-file browser site under `dist/`.
+
+The CI browser build is limited to 20 minutes and records peak resident memory. Passing the workspace tests alone does not mean the Minecraft port is complete.
 
 ## Porting rule
 
@@ -26,4 +30,4 @@ New game behavior belongs in Rust crates. Existing Java code is retained as a te
 
 ## Current milestone
 
-The workspace is scaffolding only. Game features, browser renderer, save compatibility, networking and the mod runtime are added in tested slices. Do not remove the Java reference or its build targets until parity gates pass.
+The workspace contains a tested block registry, sparse world/chunk storage, CPU face-culling mesher, versioned mod manifests, and a fuel/memory-limited Wasm mod runtime. The browser GPU shell is now being wired up. Full gameplay, assets, save compatibility and networking are still under port.
