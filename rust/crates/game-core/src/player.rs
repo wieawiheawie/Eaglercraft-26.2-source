@@ -103,9 +103,10 @@ impl Player {
         self.velocity[0] = move_x * WALK_SPEED;
         self.velocity[2] = move_z * WALK_SPEED;
 
-        if input.jump && self.on_ground {
+        let was_grounded = self.on_ground;
+        self.on_ground = false;
+        if input.jump && was_grounded {
             self.velocity[1] = JUMP_SPEED;
-            self.on_ground = false;
         }
         self.velocity[1] -= GRAVITY * dt;
 

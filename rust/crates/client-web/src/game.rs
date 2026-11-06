@@ -126,8 +126,8 @@ mod tests {
     #[test]
     fn simulation_runs_exactly_twenty_ticks_over_one_second_at_sixty_fps() {
         let mut game = GameSimulation::new().unwrap();
-        for frame in 0..60 {
-            game.frame((frame as f64 + 1.0) * 1000.0 / 60.0, Controls::default());
+        for frame in 0..=60 {
+            game.frame(frame as f64 * 1000.0 / 60.0, Controls::default());
         }
         assert_eq!(game.tick_index(), 20);
     }
@@ -135,9 +135,9 @@ mod tests {
     #[test]
     fn movement_input_is_applied_on_fixed_ticks() {
         let mut game = GameSimulation::new().unwrap();
-        for frame in 0..60 {
+        for frame in 0..=60 {
             game.frame(
-                (frame as f64 + 1.0) * 1000.0 / 60.0,
+                frame as f64 * 1000.0 / 60.0,
                 Controls { forward: true, ..Controls::default() },
             );
         }
