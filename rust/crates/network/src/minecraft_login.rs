@@ -64,7 +64,7 @@ impl AesCfb8 {
 
     fn encrypt(&mut self, bytes: &mut [u8]) {
         for byte in bytes {
-            let mut block = aes::Block::clone_from_slice(&self.iv);
+            let mut block = aes::cipher::Block::<Aes128>::clone_from_slice(&self.iv);
             self.cipher.encrypt_block(&mut block);
             let output = *byte ^ block[0];
             self.iv.copy_within(1.., 0);
@@ -108,6 +108,7 @@ pub struct MinecraftLoginSession {
     pending_public_key: Option<Vec<u8>>,
     pending_challenge: Option<Vec<u8>>,
     pending_server_id: Option<String>,
+    pending_secret: Option<[u8; 16]>,
     server_hash: Option<String>,
     failure: Option<String>,
 }
@@ -144,6 +145,7 @@ impl MinecraftLoginSession {
             pending_public_key: None,
             pending_challenge: None,
             pending_server_id: None,
+            pending_secret: None,
             server_hash: None,
             failure: None,
         };
