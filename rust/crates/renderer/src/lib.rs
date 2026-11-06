@@ -2,7 +2,7 @@
 
 mod mesh;
 
-pub use mesh::{ChunkMesh, SectionNeighbors, Vertex, mesh_section};
+pub use mesh::{BlockTextureSet, ChunkMesh, SectionNeighbors, Vertex, build_world_mesh, mesh_section, mesh_section_with_textures};
 
 #[cfg(target_arch = "wasm32")]
 mod gpu;
