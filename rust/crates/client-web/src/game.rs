@@ -12,9 +12,13 @@ pub struct Controls {
 
 impl Controls {
     pub fn player_input(self) -> PlayerInput {
+        let forward = if self.forward { 1.0 } else { 0.0 };
+        let backward = if self.backward { 1.0 } else { 0.0 };
+        let left = if self.left { 1.0 } else { 0.0 };
+        let right = if self.right { 1.0 } else { 0.0 };
         PlayerInput {
-            forward: if self.forward { 1.0 } else { 0.0 } - if self.backward { 1.0 } else { 0.0 },
-            strafe: if self.left { 1.0 } else { 0.0 } - if self.right { 1.0 } else { 0.0 },
+            forward: forward - backward,
+            strafe: left - right,
             jump: self.jump,
         }
     }

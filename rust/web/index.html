@@ -9,18 +9,48 @@
     :root { color-scheme: dark; background: #080d16; font-family: system-ui, sans-serif; }
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
-    body { display: grid; place-items: center; background: #080d16; }
-    main { width: 100%; height: 100%; display: grid; place-items: center; }
-    canvas { display: block; width: 100%; height: 100%; max-width: 100vw; max-height: 100vh; outline: none; }
+    body { background: #080d16; color: #e5edf8; }
+    canvas { display: block; width: 100%; height: 100%; outline: none; }
+    #network-panel {
+      position: fixed; z-index: 2; top: 16px; left: 16px; width: min(380px, calc(100vw - 32px));
+      padding: 14px; border: 1px solid #314158; border-radius: 10px;
+      background: rgba(10, 17, 29, .94); box-shadow: 0 12px 35px #0008;
+    }
+    #network-panel h1 { margin: 0 0 10px; font-size: 15px; font-weight: 650; }
+    #network-panel label { display: block; margin-top: 8px; color: #aebdd0; font-size: 12px; }
+    #network-panel input {
+      width: 100%; margin-top: 4px; padding: 8px 9px; border: 1px solid #40536d;
+      border-radius: 6px; background: #0c1523; color: #f3f7fc; font: 13px ui-monospace, monospace;
+    }
+    #connect-button {
+      margin-top: 10px; width: 100%; padding: 9px; border: 0; border-radius: 6px;
+      background: #315d91; color: white; font-weight: 650; cursor: pointer;
+    }
+    #connection-status {
+      margin: 10px 0 0; color: #c6d4e6; font-size: 12px; line-height: 1.45;
+      white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    #controls-hint { position: fixed; bottom: 14px; left: 16px; color: #94a7bd; font-size: 12px; }
     #error { position: fixed; inset: auto 1rem 1rem; margin: 0; white-space: pre-wrap; color: #ffb4ab; }
   </style>
 </head>
 <body>
-  <main><canvas id="game-canvas" width="1280" height="720" aria-label="Eaglercraft Rust game canvas"></canvas></main>
+  <canvas id="game-canvas" width="1280" height="720" aria-label="Eaglercraft Rust game canvas"></canvas>
+  <section id="network-panel" aria-label="Wisp connection">
+    <h1>Connect to a Minecraft / BungeeCord server via Wisp</h1>
+    <label for="wisp-relay">Wisp WebSocket relay (wss://)</label>
+    <input id="wisp-relay" type="url" placeholder="wss://your-wisp-relay.example/" spellcheck="false">
+    <label for="server-host">Server hostname</label>
+    <input id="server-host" type="text" placeholder="play.example.net" spellcheck="false">
+    <label for="server-port">Server TCP port</label>
+    <input id="server-port" type="number" min="1" max="65535" value="25565">
+    <button id="connect-button" type="button">Connect and query server</button>
+    <p id="connection-status" role="status">Enter a Wisp relay and the server's Java TCP address. The client will verify the Wisp stream and Minecraft status ping.</p>
+  </section>
+  <div id="controls-hint">WASD move · Space jump · Click the scene for mouse look</div>
   <pre id="error" role="alert"></pre>
   <script type="module">
     import init, { start } from "./pkg/eagler_client_web.js";
-
     try {
       await init();
       await start("game-canvas");

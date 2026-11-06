@@ -1,15 +1,31 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
+use eagler_network::build_wisp_uri;
 use eagler_renderer::GpuRenderer;
 use wasm_bindgen::{closure::Closure, prelude::*, JsCast};
-use web_sys::{HtmlCanvasElement, KeyboardEvent, MouseEvent};
+use web_sys::{
+    HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent,
+};
 
-use crate::game::{Controls, GameSimulation};
+use crate::{
+    game::{Controls, GameSimulation},
+    BrowserWispConnection,
+};
+
+struct NetworkUi {
+    connection: Rc<RefCell<Option<BrowserWispConnection>>>,
+    probe_started: Rc<Cell<bool>>,
+    status: HtmlElement,
+    last_status: Rc<RefCell<String>>,
+}
 
 /// Starts the Rust-owned game loop on the named canvas.
 ///
-/// Browser APIs are confined to this thin boundary. World, player physics,
-/// chunk data, simulation timing, meshing and mod execution remain Rust code.
+/// Browser APIs stay at this boundary. World state, player physics, simulation
+/// timing, block storage, meshing and mod execution are Rust implementations.
 #[wasm_bindgen]
 pub async fn start(canvas_id: &str) -> Result<(), JsValue> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("Browser window is unavailable"))?;
@@ -32,6 +48,7 @@ pub async fn start(canvas_id: &str) -> Result<(), JsValue> {
         GameSimulation::new().map_err(|message| JsValue::from_str(&message))?,
     ));
     let controls = Rc::new(RefCell::new(Controls::default()));
+    let network_ui = install_network_controls(&document)?;
 
     install_input_handlers(&window, &document, &canvas, &simulation, &controls)?;
 
@@ -50,6 +67,7 @@ pub async fn start(canvas_id: &str) -> Result<(), JsValue> {
         if let Ok(mut renderer) = renderer_for_frame.try_borrow_mut() {
             let _ = renderer.render_frame();
         }
+        update_network_ui(&network_ui);
         if let Some(next_frame) = callback_for_frame.borrow().as_ref() {
             let _ = window_for_frame.request_animation_frame(next_frame.as_ref().unchecked_ref());
         }
@@ -59,9 +77,147 @@ pub async fn start(canvas_id: &str) -> Result<(), JsValue> {
         window.request_animation_frame(first_frame.as_ref().unchecked_ref())?;
     }
 
-    // Event callbacks and the animation loop intentionally live for this page.
+    // The animation and input callbacks intentionally live for this page.
     std::mem::forget(callback);
     Ok(())
+}
+
+fn install_network_controls(document: &web_sys::Document) -> Result<NetworkUi, JsValue> {
+    let relay = document
+        .get_element_by_id("wisp-relay")
+        .ok_or_else(|| JsValue::from_str("Wisp relay input is missing"))?
+        .dyn_into::<HtmlInputElement>()?;
+    let host = document
+        .get_element_by_id("server-host")
+        .ok_or_else(|| JsValue::from_str("Server host input is missing"))?
+        .dyn_into::<HtmlInputElement>()?;
+    let port = document
+        .get_element_by_id("server-port")
+        .ok_or_else(|| JsValue::from_str("Server port input is missing"))?
+        .dyn_into::<HtmlInputElement>()?;
+    let button = document
+        .get_element_by_id("connect-button")
+        .ok_or_else(|| JsValue::from_str("Connect button is missing"))?
+        .dyn_into::<HtmlButtonElement>()?;
+    let status = document
+        .get_element_by_id("connection-status")
+        .ok_or_else(|| JsValue::from_str("Connection status label is missing"))?
+        .dyn_into::<HtmlElement>()?;
+
+    let connection = Rc::new(RefCell::new(None::<BrowserWispConnection>));
+    let probe_started = Rc::new(Cell::new(false));
+    let last_status = Rc::new(RefCell::new(String::new()));
+
+    let connection_for_click = connection.clone();
+    let probe_for_click = probe_started.clone();
+    let status_for_click = status.clone();
+    let last_for_click = last_status.clone();
+    let relay_for_click = relay.clone();
+    let host_for_click = host.clone();
+    let port_for_click = port.clone();
+
+    let click = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+        let endpoint = relay_for_click.value().trim().to_owned();
+        let hostname = host_for_click.value().trim().to_owned();
+        let port_number = match port_for_click.value().trim().parse::<u16>() {
+            Ok(value) if value > 0 => value,
+            _ => {
+                set_status(&status_for_click, &last_for_click, "Enter a valid TCP port (1-65535).");
+                return;
+            }
+        };
+        let uri = match build_wisp_uri(&endpoint, &hostname, port_number) {
+            Ok(uri) => uri,
+            Err(error) => {
+                set_status(
+                    &status_for_click,
+                    &last_for_click,
+                    &format!("Invalid relay or server address: {error:?}"),
+                );
+                return;
+            }
+        };
+
+        match BrowserWispConnection::new(&uri) {
+            Ok(client) => {
+                *connection_for_click.borrow_mut() = Some(client);
+                probe_for_click.set(false);
+                set_status(
+                    &status_for_click,
+                    &last_for_click,
+                    "Opening Wisp WebSocket relay…",
+                );
+            }
+            Err(error) => set_status(
+                &status_for_click,
+                &last_for_click,
+                &format!("Could not open Wisp connection: {error:?}"),
+            ),
+        }
+    }) as Box<dyn FnMut(web_sys::Event)>);
+    button.add_event_listener_with_callback("click", click.as_ref().unchecked_ref())?;
+    std::mem::forget(click);
+
+    Ok(NetworkUi {
+        connection,
+        probe_started,
+        status,
+        last_status,
+    })
+}
+
+fn update_network_ui(ui: &NetworkUi) {
+    let connection = ui.connection.borrow();
+    let Some(connection) = connection.as_ref() else {
+        return;
+    };
+
+    let state = connection.state();
+    if state == "connected" {
+        if !ui.probe_started.get() {
+            match connection.begin_status_query() {
+                Ok(()) => {
+                    ui.probe_started.set(true);
+                    set_status(
+                        &ui.status,
+                        &ui.last_status,
+                        "Wisp TCP stream opened. Querying the Minecraft/BungeeCord endpoint…",
+                    );
+                }
+                Err(error) => set_status(
+                    &ui.status,
+                    &ui.last_status,
+                    &format!("Wisp opened but Minecraft handshake could not start: {error:?}"),
+                ),
+            }
+            return;
+        }
+
+        match connection.poll_status() {
+            Ok(Some(json)) => set_status(
+                &ui.status,
+                &ui.last_status,
+                &format!("Minecraft server replied and ping verified:
+{json}"),
+            ),
+            Ok(None) => {}
+            Err(error) => set_status(
+                &ui.status,
+                &ui.last_status,
+                &format!("Minecraft status handshake failed: {error:?}"),
+            ),
+        }
+    } else {
+        set_status(&ui.status, &ui.last_status, &state);
+    }
+}
+
+fn set_status(element: &HtmlElement, previous: &RefCell<String>, value: &str) {
+    let mut previous = previous.borrow_mut();
+    if previous.as_str() != value {
+        element.set_inner_text(value);
+        *previous = value.to_owned();
+    }
 }
 
 fn install_input_handlers(
@@ -98,7 +254,6 @@ fn install_input_handlers(
 
     let canvas_for_click = canvas.clone();
     let click = Closure::wrap(Box::new(move |_event: MouseEvent| {
-        // Pointer lock is requested only in response to a real user click.
         let _ = canvas_for_click.request_pointer_lock();
     }) as Box<dyn FnMut(MouseEvent)>);
     canvas.add_event_listener_with_callback("click", click.as_ref().unchecked_ref())?;
