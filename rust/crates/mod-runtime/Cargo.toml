@@ -7,3 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 eagler-mod-api.workspace = true
+wasmi.workspace = true
+
+[dev-dependencies]
+wat = "1.0"

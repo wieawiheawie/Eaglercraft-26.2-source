@@ -12,7 +12,7 @@ members = [
 [workspace.package]
 edition = "2024"
 license = "All-Rights-Reserved"
-rust-version = "1.85"
+rust-version = "1.87"
 
 [workspace.dependencies]
 eagler-game-core = { path = "crates/game-core" }
@@ -20,6 +20,7 @@ eagler-world = { path = "crates/world" }
 eagler-renderer = { path = "crates/renderer" }
 eagler-mod-api = { path = "crates/mod-api" }
 eagler-mod-runtime = { path = "crates/mod-runtime" }
+wasmi = { version = "2.0.0", default-features = false, features = ["std", "validate", "portable-dispatch", "prefer-btree-collections"] }
 
 [profile.dev]
 opt-level = 1
