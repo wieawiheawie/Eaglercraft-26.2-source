@@ -26,6 +26,7 @@ eagler-network = { path = "crates/network" }
 eagler-assets = { path = "crates/assets" }
 wasmi = { version = "2.0.0", default-features = false, features = ["std", "validate", "portable-dispatch", "prefer-btree-collections"] }
 parking_lot = "0.12.5"
+bytemuck = { version = "1.25.2", features = ["derive"] }
 
 [profile.dev]
 opt-level = 1
