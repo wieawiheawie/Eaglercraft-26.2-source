@@ -9,3 +9,6 @@ mod gpu;
 
 #[cfg(target_arch = "wasm32")]
 pub use gpu::GpuRenderer;
+
+mod queue;
+pub use queue::{MeshJob, MeshJobQueue};
