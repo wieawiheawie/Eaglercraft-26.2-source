@@ -41,7 +41,7 @@ impl World {
     pub fn get_block(&self, pos: BlockPos) -> Result<BlockId, WorldError> {
         self.check_y(pos.y)?;
         let chunk_pos = pos.chunk();
-        let [local_x, local_y, local_z] = pos.local();
+        let [local_x, _local_y, local_z] = pos.local();
         Ok(self
             .chunks
             .get(&chunk_pos)

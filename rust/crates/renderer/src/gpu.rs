@@ -1,7 +1,7 @@
 use eagler_assets::TextureAtlas;
 use js_sys::Uint8Array;
 use web_sys::HtmlCanvasElement;
-use wasm_bindgen::{JsCast, UnwrapThrowExt};
+use wasm_bindgen::JsCast;
 
 use crate::ChunkMesh;
 
@@ -152,8 +152,8 @@ impl GpuRenderer {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Textured voxel pipeline layout"),
-            bind_group_layouts: &[&camera_bind_group_layout, &texture_bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&camera_bind_group_layout), Some(&texture_bind_group_layout)],
+            immediate_size: 0,
         });
         let vertex_attributes = wgpu::vertex_attr_array![
             0 => Float32x3,
@@ -171,7 +171,7 @@ impl GpuRenderer {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[vertex_layout],
+                buffers: &[Some(vertex_layout)],
             },
             primitive: wgpu::PrimitiveState {
                 cull_mode: Some(wgpu::Face::Back),
@@ -179,8 +179,8 @@ impl GpuRenderer {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: Default::default(),
                 bias: Default::default(),
             }),

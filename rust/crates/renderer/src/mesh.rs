@@ -101,7 +101,7 @@ pub fn mesh_section_with_textures(
                 if id == BlockId::AIR {
                     continue;
                 }
-                let Some(block) = registry.get(id) else {
+                let Some(_block) = registry.get(id) else {
                     continue;
                 };
 
