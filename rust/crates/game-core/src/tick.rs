@@ -51,10 +51,10 @@ impl FixedTickClock {
         };
         self.accumulator_seconds += accepted;
 
-        while self.accumulator_seconds >= TICK_SECONDS
+        while self.accumulator_seconds + TICK_SECONDS * 1.0e-9 >= TICK_SECONDS
             && report.ticks_run < MAX_TICKS_PER_FRAME
         {
-            self.accumulator_seconds -= TICK_SECONDS;
+            self.accumulator_seconds = (self.accumulator_seconds - TICK_SECONDS).max(0.0);
             self.tick_index = self.tick_index.wrapping_add(1);
             tick(self.tick_index);
             report.ticks_run += 1;

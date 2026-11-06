@@ -12,6 +12,3 @@ pub use math::{Aabb, Plane};
 
 mod player;
 pub use player::{CollisionWorld, Player, PlayerInput};
-
-mod tick;
-pub use tick::{FixedTickClock, TickReport};

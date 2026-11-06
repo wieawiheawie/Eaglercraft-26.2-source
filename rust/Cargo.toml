@@ -6,7 +6,6 @@ members = [
     "crates/renderer",
     "crates/mod-api",
     "crates/mod-runtime",
-    "crates/network",
     "crates/client-web",
 ]
 
@@ -21,7 +20,6 @@ eagler-world = { path = "crates/world" }
 eagler-renderer = { path = "crates/renderer" }
 eagler-mod-api = { path = "crates/mod-api" }
 eagler-mod-runtime = { path = "crates/mod-runtime" }
-eagler-network = { path = "crates/network" }
 wasmi = { version = "2.0.0", default-features = false, features = ["std", "validate", "portable-dispatch", "prefer-btree-collections"] }
 parking_lot = "0.12.5"
 

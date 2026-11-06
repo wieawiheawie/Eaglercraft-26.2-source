@@ -225,13 +225,13 @@ impl WispSession {
                 return self.fail(WispError::InvalidPacket("expected Wisp v1 greeting"));
             }
             self.credits = u64::from(read_u32_le(packet, 5));
-            let hostname = self.host.as_bytes();
+            let hostname = self.host.clone();
             let mut open = self.take_packet_buffer(HEADER_LEN + 3 + hostname.len());
             open.push(1);
             open.extend_from_slice(&1_u32.to_le_bytes());
             open.push(1); // TCP
             open.extend_from_slice(&self.port.to_le_bytes());
-            open.extend_from_slice(hostname);
+            open.extend_from_slice(hostname.as_bytes());
             self.outbound.push_back(open);
             self.state = WispState::Ready;
             return Ok(());
