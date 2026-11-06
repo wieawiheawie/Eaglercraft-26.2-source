@@ -143,3 +143,21 @@ mod tests {
         assert_eq!(World::new(i32::MAX, 2).err(), Some(WorldError::InvalidHeight));
     }
 }
+
+impl eagler_game_core::CollisionWorld for World {
+    fn is_solid_at(
+        &self,
+        x: i32,
+        y: i32,
+        z: i32,
+        registry: &eagler_game_core::BlockRegistry,
+    ) -> bool {
+        if y < self.min_y() {
+            return true;
+        }
+        let Ok(block_id) = self.get_block(BlockPos::new(x, y, z)) else {
+            return false;
+        };
+        registry.get(block_id).is_some_and(|block| block.solid)
+    }
+}

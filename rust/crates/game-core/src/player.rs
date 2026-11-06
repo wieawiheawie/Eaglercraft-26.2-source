@@ -1,6 +1,9 @@
-use eagler_world::{BlockPos, World};
+use crate::{Aabb, BlockRegistry};
 
-use crate::{Aabb, BlockId, BlockRegistry};
+/// Minimal world collision contract, implemented by the world storage crate.
+pub trait CollisionWorld {
+    fn is_solid_at(&self, x: i32, y: i32, z: i32, registry: &BlockRegistry) -> bool;
+}
 
 const PLAYER_RADIUS: f32 = 0.3;
 const PLAYER_HEIGHT: f32 = 1.8;
@@ -78,7 +81,7 @@ impl Player {
     /// voxel collision resolution. No renderer or browser APIs are involved.
     pub fn tick(
         &mut self,
-        world: &World,
+        world: &impl CollisionWorld,
         registry: &BlockRegistry,
         input: PlayerInput,
         delta_seconds: f32,
@@ -113,7 +116,7 @@ impl Player {
 
     fn move_axis(
         &mut self,
-        world: &World,
+        world: &impl CollisionWorld,
         registry: &BlockRegistry,
         axis: usize,
         movement: f32,
@@ -146,7 +149,7 @@ impl Player {
         }
     }
 
-    fn collides(&self, world: &World, registry: &BlockRegistry) -> bool {
+    fn collides(&self, world: &impl CollisionWorld, registry: &BlockRegistry) -> bool {
         let bounds = self.bounds();
         let min = bounds.min.map(|value| value.floor() as i32);
         let max = bounds.max.map(|value| (value - 0.0001).floor() as i32);
@@ -154,16 +157,7 @@ impl Player {
         for x in min[0]..=max[0] {
             for y in min[1]..=max[1] {
                 for z in min[2]..=max[2] {
-                    let pos = BlockPos::new(x, y, z);
-                    let block_id = match world.get_block(pos) {
-                        Ok(block_id) => block_id,
-                        Err(_) if y < world.min_y() => BlockId(1),
-                        Err(_) => BlockId::AIR,
-                    };
-                    let Some(block) = registry.get(block_id) else {
-                        continue;
-                    };
-                    if block.solid {
+                    if world.is_solid_at(x, y, z, registry) {
                         let block_bounds = Aabb {
                             min: [x as f32, y as f32, z as f32],
                             max: [x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0],
@@ -181,20 +175,20 @@ impl Player {
 
 #[cfg(test)]
 mod tests {
-    use eagler_world::{BlockPos, World};
+    use crate::{BlockRegistry, CollisionWorld, Player, PlayerInput};
 
-    use crate::{BlockRegistry, Player, PlayerInput};
+    struct FlatFloor;
 
-    fn test_world() -> (World, BlockRegistry) {
-        let mut world = World::new(-64, 384).unwrap();
-        let mut registry = BlockRegistry::new();
-        let stone = registry.register("minecraft:stone", true, true).unwrap();
-        for x in -4..=4 {
-            for z in -4..=4 {
-                world.set_block(BlockPos::new(x, 0, z), stone).unwrap();
-            }
+    impl CollisionWorld for FlatFloor {
+        fn is_solid_at(&self, x: i32, y: i32, z: i32, _registry: &BlockRegistry) -> bool {
+            y == 0 && (-4..=4).contains(&x) && (-4..=4).contains(&z)
         }
-        (world, registry)
+    }
+
+    fn test_world() -> (FlatFloor, BlockRegistry) {
+        let mut registry = BlockRegistry::new();
+        registry.register("minecraft:stone", true, true).unwrap();
+        (FlatFloor, registry)
     }
 
     #[test]

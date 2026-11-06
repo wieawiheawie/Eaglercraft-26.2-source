@@ -11,4 +11,4 @@ pub use lighting::propagate_light_16;
 pub use math::{Aabb, Plane};
 
 mod player;
-pub use player::{Player, PlayerInput};
+pub use player::{CollisionWorld, Player, PlayerInput};
