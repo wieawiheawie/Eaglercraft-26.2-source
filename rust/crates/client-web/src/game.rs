@@ -13,8 +13,8 @@ pub struct Controls {
 impl Controls {
     pub fn player_input(self) -> PlayerInput {
         PlayerInput {
-            forward: f32::from(self.forward) - f32::from(self.backward),
-            strafe: f32::from(self.left) - f32::from(self.right),
+            forward: if self.forward { 1.0 } else { 0.0 } - if self.backward { 1.0 } else { 0.0 },
+            strafe: if self.left { 1.0 } else { 0.0 } - if self.right { 1.0 } else { 0.0 },
             jump: self.jump,
         }
     }
