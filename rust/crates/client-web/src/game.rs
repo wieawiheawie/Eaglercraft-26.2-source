@@ -1,5 +1,8 @@
+use std::collections::BTreeMap;
+
 use eagler_game_core::{BlockId, BlockRegistry, FixedTickClock, Player, PlayerInput, TickReport};
-use eagler_world::{BlockPos, World};
+use eagler_network::{DecodedChunk, WorldPacket};
+use eagler_world::{BlockPos, ChunkPos, World};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Controls {
@@ -32,6 +35,7 @@ pub struct GameSimulation {
     clock: FixedTickClock,
     last_frame_ms: Option<f64>,
     last_report: TickReport,
+    network_state_map: BTreeMap<u32, BlockId>,
 }
 
 impl GameSimulation {
@@ -53,6 +57,10 @@ impl GameSimulation {
             }
         }
 
+        let mut network_state_map = BTreeMap::new();
+        network_state_map.insert(0, BlockId::AIR);
+        network_state_map.insert(1, stone);
+
         let mut player = Player::new([0.5, 1.0, 0.5]);
         player.set_look(0.0, 0.35);
         player.on_ground = true;
@@ -63,6 +71,7 @@ impl GameSimulation {
             clock: FixedTickClock::new(),
             last_frame_ms: None,
             last_report: TickReport::default(),
+            network_state_map,
         })
     }
 
@@ -89,6 +98,77 @@ impl GameSimulation {
         }
         self.last_report = report;
         report
+    }
+
+    /// Applies an authoritative chunk packet to the sparse world. Unknown
+    /// network block-state IDs receive stable local placeholder definitions;
+    /// resource-registry parity later replaces their generic material metadata.
+    pub fn ingest_world_packet(&mut self, packet: WorldPacket) -> Result<bool, String> {
+        match packet {
+            WorldPacket::ForgetChunk { x, z } => {
+                Ok(self.world.remove_chunk(ChunkPos::new(x, z)))
+            }
+            WorldPacket::Chunk(chunk) => {
+                self.ingest_chunk(chunk)?;
+                Ok(true)
+            }
+            WorldPacket::PlayerPosition {
+                position,
+                delta_movement,
+                yaw,
+                pitch,
+                relative_flags,
+                ..
+            } => {
+                let current = self.player.position;
+                let target = [
+                    if relative_flags & 1 != 0 { current[0] as f64 + position[0] } else { position[0] },
+                    if relative_flags & 2 != 0 { current[1] as f64 + position[1] } else { position[1] },
+                    if relative_flags & 4 != 0 { current[2] as f64 + position[2] } else { position[2] },
+                ];
+                if target.iter().any(|value| !value.is_finite() || value.abs() > 30_000_000.0) {
+                    return Err("Server sent an invalid player position".to_owned());
+                }
+                self.player.position = target.map(|value| value as f32);
+                self.player.velocity = [
+                    if relative_flags & 32 != 0 { self.player.velocity[0] + delta_movement[0] as f32 } else { delta_movement[0] as f32 },
+                    if relative_flags & 64 != 0 { self.player.velocity[1] + delta_movement[1] as f32 } else { delta_movement[1] as f32 },
+                    if relative_flags & 128 != 0 { self.player.velocity[2] + delta_movement[2] as f32 } else { delta_movement[2] as f32 },
+                ];
+                let current_yaw = self.player.yaw.to_degrees();
+                let current_pitch = self.player.pitch.to_degrees();
+                let yaw_degrees = if relative_flags & 8 != 0 { current_yaw + yaw } else { yaw };
+                let pitch_degrees = if relative_flags & 16 != 0 { current_pitch + pitch } else { pitch };
+                self.player.yaw = yaw_degrees.to_radians().rem_euclid(std::f32::consts::TAU);
+                self.player.pitch = pitch_degrees.to_radians().clamp(-1.553_343, 1.553_343);
+                self.player.on_ground = false;
+                Ok(false)
+            }
+        }
+    }
+
+    fn ingest_chunk(&mut self, chunk: DecodedChunk) -> Result<(), String> {
+        let chunk_pos = ChunkPos::new(chunk.x, chunk.z);
+        for section in chunk.sections {
+            let mut local_ids = Vec::with_capacity(section.block_states.len());
+            for network_id in section.block_states {
+                let local_id = if let Some(id) = self.network_state_map.get(&network_id) {
+                    *id
+                } else {
+                    let key = format!("minecraft:network_state/{network_id}");
+                    let id = self.registry
+                        .register(&key, true, true)
+                        .map_err(|error| format!("Could not register network block state {network_id}: {error:?}"))?;
+                    self.network_state_map.insert(network_id, id);
+                    id
+                };
+                local_ids.push(local_id);
+            }
+            self.world
+                .replace_section(chunk_pos, section.section_y, local_ids)
+                .map_err(|error| format!("Could not ingest chunk {},{} section {}: {error:?}", chunk.x, chunk.z, section.section_y))?;
+        }
+        Ok(())
     }
 
     pub fn look(&mut self, yaw_delta: f32, pitch_delta: f32) {
@@ -121,6 +201,16 @@ impl GameSimulation {
 
     pub fn player_forward(&self) -> [f32; 3] {
         self.player.forward()
+    }
+
+    pub fn player_network_snapshot(&self) -> (u64, [f32; 3], f32, f32, bool) {
+        (
+            self.clock.tick_index(),
+            self.player.position,
+            self.player.yaw.to_degrees(),
+            self.player.pitch.to_degrees(),
+            self.player.on_ground,
+        )
     }
 
     pub fn world_block_count_hint(&self) -> usize {

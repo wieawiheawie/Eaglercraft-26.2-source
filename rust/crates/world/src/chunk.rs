@@ -17,6 +17,13 @@ impl Default for ChunkSection {
 }
 
 impl ChunkSection {
+    /// Takes ownership of a decoded 4096-entry section buffer.
+    pub fn from_vec(blocks: Vec<BlockId>) -> Option<Self> {
+        let boxed = blocks.into_boxed_slice();
+        let blocks: Box<[BlockId; SECTION_VOLUME]> = boxed.try_into().ok()?;
+        Some(Self { blocks })
+    }
+
     pub fn new() -> Self {
         Self {
             blocks: Box::new([BlockId::AIR; SECTION_VOLUME]),
@@ -79,6 +86,14 @@ impl Chunk {
                 .entry(section_y)
                 .or_default()
                 .set(x, local_y, z, id)
+        }
+    }
+
+    pub fn set_section(&mut self, section_y: i32, section: ChunkSection) {
+        if section.is_empty() {
+            self.sections.remove(&section_y);
+        } else {
+            self.sections.insert(section_y, section);
         }
     }
 

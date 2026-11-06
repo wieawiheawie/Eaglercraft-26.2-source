@@ -2,7 +2,8 @@ use std::{cell::RefCell, rc::{Rc, Weak}};
 
 use js_sys::{ArrayBuffer, Uint8Array};
 use eagler_network::{
-    parse_wisp_uri, MinecraftStatusProbe, StatusProbeState, WispSession, WispState, WispTarget,
+    parse_wisp_uri, LoginState, MinecraftLoginSession, MinecraftStatusProbe, StatusProbeState,
+    WispSession, WispState, WispTarget, WorldPacket,
 };
 use wasm_bindgen::{closure::Closure, prelude::*, JsCast};
 use web_sys::{BinaryType, CloseEvent, Event, MessageEvent, WebSocket};
@@ -16,6 +17,8 @@ struct ConnectionInner {
     failure: Option<String>,
     status_probe: Option<MinecraftStatusProbe>,
     probe_output: Vec<u8>,
+    login_session: Option<MinecraftLoginSession>,
+    login_output: Vec<u8>,
 }
 
 #[wasm_bindgen]
@@ -48,6 +51,8 @@ impl BrowserWispConnection {
             failure: None,
             status_probe: None,
             probe_output: Vec::with_capacity(64 * 1024),
+            login_session: None,
+            login_output: Vec::with_capacity(64 * 1024),
         }));
 
         let weak: Weak<RefCell<ConnectionInner>> = Rc::downgrade(&inner);
@@ -242,6 +247,128 @@ impl BrowserWispConnection {
         Ok(status)
     }
 
+    /// Starts a fresh Minecraft login handshake on this Wisp TCP stream.
+    /// Call this only on a new connection after the status probe has completed.
+    pub fn begin_login(&self, username: &str) -> Result<(), JsValue> {
+        let mut inner = self.inner.borrow_mut();
+        if inner.session.state() != WispState::Ready {
+            return Err(JsValue::from_str("Wisp TCP stream is not ready yet"));
+        }
+        if inner.login_session.is_some() {
+            return Err(JsValue::from_str("A Minecraft login is already active"));
+        }
+        let mut login = MinecraftLoginSession::new(&inner.target.host, inner.target.port, username)
+            .map_err(|error| JsValue::from_str(&format!("Could not start Minecraft login: {error:?}")))?;
+        let ConnectionInner {
+            session,
+            login_output,
+            login_session,
+            ..
+        } = &mut *inner;
+        login.take_outbound(login_output);
+        session
+            .send_tcp(login_output)
+            .map_err(|error| JsValue::from_str(&format!("Could not send Login Start: {error:?}")))?;
+        *login_session = Some(login);
+        flush_outbound(&mut inner);
+        Ok(())
+    }
+
+    /// Polls the TCP byte stream, advances Login/Configuration/Play state,
+    /// and sends queued protocol replies through Wisp's credit-controlled path.
+    pub fn poll_login(&self) -> Result<String, JsValue> {
+        let mut inner = self.inner.borrow_mut();
+        if let Some(error) = &inner.failure {
+            return Err(JsValue::from_str(error));
+        }
+        if inner.login_session.is_none() {
+            return Err(JsValue::from_str("Start Minecraft login first"));
+        }
+
+        let mut scratch = [0_u8; 8192];
+        loop {
+            let count = inner.session.read_tcp(&mut scratch);
+            if count == 0 {
+                break;
+            }
+            let result = inner
+                .login_session
+                .as_mut()
+                .expect("login session was checked")
+                .receive_tcp(&scratch[..count]);
+            if let Err(error) = result {
+                if matches!(error, eagler_network::LoginError::AuthenticationRequired { .. }) {
+                    break;
+                }
+                return Err(JsValue::from_str(&format!("Minecraft login failed: {error:?}")));
+            }
+        }
+
+        {
+            let ConnectionInner {
+                session,
+                login_output,
+                login_session,
+                ..
+            } = &mut *inner;
+            let login = login_session.as_mut().expect("login session was checked");
+            login.take_outbound(login_output);
+            if !login_output.is_empty() {
+                session
+                    .send_tcp(login_output)
+                    .map_err(|error| JsValue::from_str(&format!("Could not send Minecraft protocol reply: {error:?}")))?;
+            }
+        }
+        let state = inner.login_session.as_ref().expect("login session was checked").state();
+        flush_outbound(&mut inner);
+        Ok(login_state_label(state).to_owned())
+    }
+
+    pub fn login_state(&self) -> Option<String> {
+        self.inner.borrow().login_session.as_ref().map(|session| login_state_label(session.state()).to_owned())
+    }
+
+    /// Sends authoritative movement once per fixed 20 TPS simulation tick.
+    pub fn send_player_movement(
+        &self,
+        x: f32,
+        y: f32,
+        z: f32,
+        yaw_degrees: f32,
+        pitch_degrees: f32,
+        on_ground: bool,
+    ) -> Result<(), JsValue> {
+        let mut inner = self.inner.borrow_mut();
+        let ConnectionInner {
+            session,
+            login_output,
+            login_session,
+            ..
+        } = &mut *inner;
+        let login = login_session
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("Minecraft login has not started"))?;
+        login
+            .queue_player_movement([x, y, z], yaw_degrees, pitch_degrees, on_ground)
+            .map_err(|error| JsValue::from_str(&format!("Could not queue player movement: {error:?}")))?;
+        login.take_outbound(login_output);
+        if !login_output.is_empty() {
+            session
+                .send_tcp(login_output)
+                .map_err(|error| JsValue::from_str(&format!("Could not send player movement: {error:?}")))?;
+        }
+        flush_outbound(&mut inner);
+        Ok(())
+    }
+
+    pub fn authentication_server_hash(&self) -> Option<String> {
+        self.inner
+            .borrow()
+            .login_session
+            .as_ref()
+            .and_then(|session| session.server_hash().map(str::to_owned))
+    }
+
     pub fn close(&self) {
         let mut inner = self.inner.borrow_mut();
         inner.session.close();
@@ -268,6 +395,38 @@ impl Drop for BrowserWispConnection {
             &self.on_error,
             &self.on_close,
         );
+    }
+}
+
+impl BrowserWispConnection {
+    /// Pops the next decoded world update for the Rust simulation.
+    pub fn pop_world_packet(&self) -> Option<WorldPacket> {
+        self.inner
+            .borrow_mut()
+            .login_session
+            .as_mut()
+            .and_then(MinecraftLoginSession::pop_world_packet)
+    }
+
+    pub fn queued_world_packets(&self) -> usize {
+        self.inner
+            .borrow()
+            .login_session
+            .as_ref()
+            .map_or(0, MinecraftLoginSession::queued_world_packets)
+    }
+}
+
+fn login_state_label(state: LoginState) -> &'static str {
+    match state {
+        LoginState::AwaitingLogin => "awaiting-login",
+        LoginState::Authenticating => "authenticating",
+        LoginState::AuthenticationRequired => "authentication-required",
+        LoginState::AwaitingLoginSuccess => "awaiting-login-success",
+        LoginState::Configuring => "configuring",
+        LoginState::AwaitingPlayLogin => "awaiting-play-login",
+        LoginState::Ready => "ready",
+        LoginState::Failed => "failed",
     }
 }
 

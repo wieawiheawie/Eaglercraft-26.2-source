@@ -2,12 +2,13 @@ use std::collections::BTreeMap;
 
 use eagler_game_core::BlockId;
 
-use crate::{BlockPos, Chunk, ChunkPos};
+use crate::{BlockPos, Chunk, ChunkPos, ChunkSection};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorldError {
     InvalidHeight,
     OutsideDimension { y: i32, min_y: i32, max_y_exclusive: i32 },
+    InvalidSectionLength { expected: usize, actual: usize },
 }
 
 #[derive(Clone, Debug)]
@@ -65,6 +66,48 @@ impl World {
         Ok(previous)
     }
 
+
+    /// Replaces one complete 16x16x16 section with already decoded block IDs.
+    /// This is the ingestion path for network chunk palettes; it avoids 4096
+    /// individual BTreeMap lookups and preserves sparse empty-section storage.
+    pub fn replace_section(
+        &mut self,
+        pos: ChunkPos,
+        section_y: i32,
+        blocks: Vec<BlockId>,
+    ) -> Result<(), WorldError> {
+        let min_section = self.min_y.div_euclid(16);
+        let max_section = (self.max_y_exclusive - 1).div_euclid(16);
+        if !(min_section..=max_section).contains(&section_y) {
+            return Err(WorldError::OutsideDimension {
+                y: section_y.saturating_mul(16),
+                min_y: self.min_y,
+                max_y_exclusive: self.max_y_exclusive,
+            });
+        }
+        if blocks.len() != crate::SECTION_VOLUME {
+            return Err(WorldError::InvalidSectionLength {
+                expected: crate::SECTION_VOLUME,
+                actual: blocks.len(),
+            });
+        }
+        let section = ChunkSection::from_vec(blocks).ok_or(WorldError::InvalidSectionLength {
+            expected: crate::SECTION_VOLUME,
+            actual: 0,
+        })?;
+        let chunk = self.chunks.entry(pos).or_default();
+        chunk.set_section(section_y, section);
+        if chunk.is_empty() {
+            self.chunks.remove(&pos);
+        }
+        Ok(())
+    }
+
+    /// Removes a whole chunk when the server sends Forget Level Chunk.
+    pub fn remove_chunk(&mut self, pos: ChunkPos) -> bool {
+        self.chunks.remove(&pos).is_some()
+    }
+
     pub fn chunk(&self, pos: ChunkPos) -> Option<&Chunk> {
         self.chunks.get(&pos)
     }
@@ -120,6 +163,20 @@ mod tests {
         assert_eq!(world.get_block(pos), Ok(stone));
         assert_eq!(world.chunk_count(), 1);
         assert_eq!(world.set_block(pos, BlockId::AIR), Ok(stone));
+        assert_eq!(world.chunk_count(), 0);
+    }
+
+    #[test]
+    fn network_section_replacement_is_bulk_and_preserves_sparse_chunks() {
+        let mut world = World::new(-64, 384).unwrap();
+        let pos = ChunkPos::new(-2, 3);
+        let mut blocks = vec![BlockId::AIR; crate::SECTION_VOLUME];
+        blocks[0] = BlockId(1);
+        world.replace_section(pos, -4, blocks).unwrap();
+        assert_eq!(world.chunk_count(), 1);
+        assert_eq!(world.get_block(BlockPos::new(-32, -64, 48)), Ok(BlockId(1)));
+
+        world.replace_section(pos, -4, vec![BlockId::AIR; crate::SECTION_VOLUME]).unwrap();
         assert_eq!(world.chunk_count(), 0);
     }
 

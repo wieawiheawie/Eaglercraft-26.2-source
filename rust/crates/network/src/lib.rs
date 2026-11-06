@@ -1,8 +1,10 @@
 //! Browser-friendly Wisp v1 transport and Minecraft status protocol framing.
 
+mod chunk;
 mod minecraft;
 mod wisp;
 
+pub use chunk::{decode_chunk_with_light, ChunkDecodeError, DecodedChunk, DecodedSection, WorldPacket};
 pub use minecraft::{
     CodecError, MinecraftStatusProbe, StatusProbeState, MINECRAFT_PROTOCOL_VERSION,
 };

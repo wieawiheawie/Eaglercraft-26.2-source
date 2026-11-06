@@ -44,8 +44,10 @@
     <input id="server-host" type="text" placeholder="play.example.net" spellcheck="false">
     <label for="server-port">Server TCP port</label>
     <input id="server-port" type="number" min="1" max="65535" value="25565">
-    <button id="connect-button" type="button">Connect and query server</button>
-    <p id="connection-status" role="status">Enter a Wisp relay and the server's Java TCP address. The client will verify the Wisp stream and Minecraft status ping.</p>
+    <label for="player-username">Minecraft username (offline-mode servers)</label>
+    <input id="player-username" type="text" maxlength="16" value="RustPlayer" spellcheck="false" autocomplete="off">
+    <button id="connect-button" type="button">Ping server, then join</button>
+    <p id="connection-status" role="status">Enter a Wisp relay, Java TCP address and username. The client verifies the status ping, opens a fresh login stream, then loads protocol-776 world chunks.</p>
   </section>
   <div id="controls-hint">WASD move · Space jump · Click the scene for mouse look</div>
   <pre id="error" role="alert"></pre>

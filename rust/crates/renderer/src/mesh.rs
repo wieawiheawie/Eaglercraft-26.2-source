@@ -117,7 +117,11 @@ pub fn mesh_section_with_textures(
                         continue;
                     }
 
-                    let region = textures.get(&id).copied().map(|set| set.for_normal(face.normal));
+                    let region = textures
+                        .get(&id)
+                        .or_else(|| textures.get(&BlockId(1)))
+                        .copied()
+                        .map(|set| set.for_normal(face.normal));
                     let uv_min = region.map_or([0.0, 0.0], AtlasRegion::uv_min);
                     let uv_max = region.map_or([1.0, 1.0], AtlasRegion::uv_max);
                     let base = mesh.vertices.len() as u32;
