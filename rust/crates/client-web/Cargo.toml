@@ -20,4 +20,4 @@ eagler-network.workspace = true
 wasm-bindgen-futures = "0.4"
 wasm-bindgen = "0.2"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "WebSocket", "BinaryType", "MessageEvent", "CloseEvent", "Event"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "WebSocket", "BinaryType", "MessageEvent", "CloseEvent", "Event", "KeyboardEvent", "MouseEvent", "HtmlElement"] }

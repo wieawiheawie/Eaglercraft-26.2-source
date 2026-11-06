@@ -8,3 +8,5 @@ mod wisp_browser;
 
 #[cfg(target_arch = "wasm32")]
 pub use wisp_browser::BrowserWispConnection;
+
+mod game;
