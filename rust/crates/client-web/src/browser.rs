@@ -1,10 +1,12 @@
 use std::{
     cell::{Cell, RefCell},
+    collections::BTreeMap,
     rc::Rc,
 };
 
 use eagler_network::build_wisp_uri;
-use eagler_renderer::GpuRenderer;
+use eagler_renderer::{build_world_mesh, BlockTextureSet, GpuRenderer};
+use eagler_assets::ResourceLocation;
 use crate::assets_browser::load_starter_texture_atlas;
 use wasm_bindgen::{closure::Closure, prelude::*, JsCast};
 use web_sys::{
@@ -43,11 +45,29 @@ pub async fn start(canvas_id: &str) -> Result<(), JsValue> {
     let mut gpu_renderer = GpuRenderer::new(canvas.clone())
         .await
         .map_err(|message| JsValue::from_str(&message))?;
-    let _loaded_textures = load_starter_texture_atlas(&mut gpu_renderer).await?;
+    let texture_regions = load_starter_texture_atlas(&mut gpu_renderer).await?;
+    let simulation = GameSimulation::new().map_err(|message| JsValue::from_str(&message))?;
+    let stone_id = simulation
+        .block_id("minecraft:stone")
+        .ok_or_else(|| JsValue::from_str("Stone block registration is missing"))?;
+    let stone_key = ResourceLocation::parse("minecraft:block/stone")
+        .map_err(|error| JsValue::from_str(&format!("Invalid stone texture key: {error:?}")))?;
+    let stone_region = texture_regions
+        .get(&stone_key)
+        .copied()
+        .ok_or_else(|| JsValue::from_str("Stone texture was not packed into the atlas"))?;
+    let block_textures = BTreeMap::from([(
+        stone_id,
+        BlockTextureSet::uniform(stone_region),
+    )]);
+    let world_mesh = build_world_mesh(simulation.world(), simulation.registry(), &block_textures);
+    gpu_renderer
+        .set_mesh(&world_mesh)
+        .map_err(|error| JsValue::from_str(&error))?;
+
+    let simulation = Rc::new(RefCell::new(simulation));
     let renderer = Rc::new(RefCell::new(gpu_renderer));
-    let simulation = Rc::new(RefCell::new(
-        GameSimulation::new().map_err(|message| JsValue::from_str(&message))?,
-    ));
+    let aspect_ratio = canvas.width().max(1) as f32 / canvas.height().max(1) as f32;
     let controls = Rc::new(RefCell::new(Controls::default()));
     let network_ui = install_network_controls(&document)?;
 
@@ -59,13 +79,20 @@ pub async fn start(canvas_id: &str) -> Result<(), JsValue> {
     let simulation_for_frame = simulation.clone();
     let controls_for_frame = controls.clone();
     let window_for_frame = window.clone();
+    let aspect_for_frame = aspect_ratio;
 
     *callback.borrow_mut() = Some(Closure::wrap(Box::new(move |timestamp_ms: f64| {
         let sampled_controls = *controls_for_frame.borrow();
-        if let Ok(mut game) = simulation_for_frame.try_borrow_mut() {
+        let camera = if let Ok(mut game) = simulation_for_frame.try_borrow_mut() {
             game.frame(timestamp_ms, sampled_controls);
-        }
-        if let Ok(mut renderer) = renderer_for_frame.try_borrow_mut() {
+            Some((game.player_eye_position(), game.player_forward()))
+        } else {
+            None
+        };
+        if let (Some((eye, forward)), Ok(mut renderer)) =
+            (camera, renderer_for_frame.try_borrow_mut())
+        {
+            renderer.set_camera(eye, forward, aspect_for_frame);
             let _ = renderer.render_frame();
         }
         update_network_ui(&network_ui);

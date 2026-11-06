@@ -54,6 +54,7 @@ impl GameSimulation {
         }
 
         let mut player = Player::new([0.5, 1.0, 0.5]);
+        player.set_look(0.0, 0.35);
         player.on_ground = true;
         Ok(Self {
             world,
@@ -92,6 +93,18 @@ impl GameSimulation {
 
     pub fn look(&mut self, yaw_delta: f32, pitch_delta: f32) {
         self.player.set_look(yaw_delta, pitch_delta);
+    }
+
+    pub fn world(&self) -> &World {
+        &self.world
+    }
+
+    pub fn registry(&self) -> &BlockRegistry {
+        &self.registry
+    }
+
+    pub fn block_id(&self, key: &str) -> Option<BlockId> {
+        self.registry.id(key)
     }
 
     pub fn tick_index(&self) -> u64 {

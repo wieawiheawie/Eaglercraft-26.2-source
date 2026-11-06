@@ -1,5 +1,7 @@
+use std::collections::BTreeMap;
+
 use eagler_assets::{
-    decode_png_rgba, AssetStore, ResourceLocation, TextureAtlasBuilder,
+    decode_png_rgba, AssetStore, AtlasRegion, ResourceLocation, TextureAtlasBuilder,
 };
 use eagler_renderer::GpuRenderer;
 use js_sys::Uint8Array;
@@ -25,7 +27,9 @@ async fn fetch_resource(path: &str) -> Result<Vec<u8>, JsValue> {
 
 /// Loads genuine Minecraft resource-pack textures, decodes them in Rust,
 /// packs a deterministic RGBA atlas, and uploads the atlas to the GPU.
-pub async fn load_starter_texture_atlas(renderer: &mut GpuRenderer) -> Result<usize, JsValue> {
+pub async fn load_starter_texture_atlas(
+    renderer: &mut GpuRenderer,
+) -> Result<BTreeMap<ResourceLocation, AtlasRegion>, JsValue> {
     let resources = [
         "minecraft:block/stone",
         "minecraft:block/dirt",
@@ -41,10 +45,10 @@ pub async fn load_starter_texture_atlas(renderer: &mut GpuRenderer) -> Result<us
             .map_err(|error| JsValue::from_str(&format!("Invalid built-in texture id: {error:?}")))?;
         let path = key.texture_png_path();
         let bytes = fetch_resource(&path).await?;
-        cache
-            .insert(key.clone(), bytes.clone())
+        let cached = cache
+            .insert(key.clone(), bytes)
             .map_err(|error| JsValue::from_str(&format!("Could not cache {identifier}: {error:?}")))?;
-        let decoded = decode_png_rgba(&bytes)
+        let decoded = decode_png_rgba(&cached)
             .map_err(|error| JsValue::from_str(&format!("Could not decode {path}: {error:?}")))?;
         builder
             .insert(key, decoded)
@@ -54,13 +58,12 @@ pub async fn load_starter_texture_atlas(renderer: &mut GpuRenderer) -> Result<us
     let atlas = builder
         .build()
         .map_err(|error| JsValue::from_str(&format!("Could not build Minecraft texture atlas: {error:?}")))?;
-    let loaded = atlas.regions().len();
+    let regions = atlas.regions().clone();
     renderer
         .upload_texture_atlas(&atlas)
         .map_err(|error| JsValue::from_str(&error))?;
 
-    // Cache is intentionally bounded and local to startup. The GPU owns the
-    // retained atlas from this point; individual source PNGs can be discarded.
+    // The GPU retains the packed atlas; release source PNG cache bytes.
     cache.clear();
-    Ok(loaded)
+    Ok(regions)
 }

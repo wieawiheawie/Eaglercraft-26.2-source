@@ -2,7 +2,6 @@ use eagler_assets::TextureAtlas;
 use js_sys::Uint8Array;
 use web_sys::HtmlCanvasElement;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
-use wgpu::util::DeviceExt;
 
 use crate::ChunkMesh;
 
