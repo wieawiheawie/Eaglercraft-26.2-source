@@ -4,3 +4,11 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+
+[dependencies]
+aes = "0.8.4"
+flate2 = "1.1.5"
+md-5 = "0.10.6"
+rand = "0.8.5"
+rsa = "0.9.8"
+sha1 = "0.10.6"
