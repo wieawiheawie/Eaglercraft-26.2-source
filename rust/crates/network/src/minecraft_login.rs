@@ -1020,9 +1020,17 @@ mod tests {
         assert!(!output.is_empty());
 
         let (frame_len, prefix_len) = super::read_varint(&output).unwrap().unwrap();
-        assert_eq!(frame_len as usize + prefix_len, output.len());
-        assert_eq!(output[prefix_len], 0); // Handshake packet id.
-        assert_eq!(super::read_varint(&output[prefix_len + 1..]).unwrap().unwrap().0, 776);
+        let first_end = prefix_len + frame_len as usize;
+        assert!(first_end < output.len()); // A second, distinct Login Start frame follows.
+        assert_eq!(super::read_varint(&output[prefix_len..first_end]).unwrap().unwrap().0, 0);
+        assert_eq!(
+            super::read_varint(&output[prefix_len + 1..first_end]).unwrap().unwrap().0,
+            776
+        );
+        let (login_len, login_prefix) = super::read_varint(&output[first_end..]).unwrap().unwrap();
+        let login_start = first_end + login_prefix;
+        assert_eq!(login_len as usize, output.len() - login_start);
+        assert_eq!(super::read_varint(&output[login_start..]).unwrap().unwrap().0, 0);
         assert_eq!(session.state(), LoginState::AwaitingLoginSuccess);
     }
 
@@ -1089,9 +1097,11 @@ mod tests {
     #[test]
     fn movement_queue_emits_position_rotation_and_client_tick_end() {
         let mut session = MinecraftLoginSession::new("localhost", 25565, "RustPlayer").unwrap();
+        let mut output = Vec::new();
+        session.take_outbound(&mut output); // Discard the constructor's handshake/Login Start.
+        output.clear();
         session.state = LoginState::Ready;
         session.queue_player_movement([1.0, 64.0, -2.0], 90.0, -10.0, true).unwrap();
-        let mut output = Vec::new();
         session.take_outbound(&mut output);
 
         let (first_length, first_prefix) = super::read_varint(&output).unwrap().unwrap();
