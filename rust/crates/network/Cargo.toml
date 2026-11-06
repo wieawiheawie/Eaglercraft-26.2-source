@@ -12,3 +12,7 @@ md-5 = "0.10.6"
 rand = "0.8.5"
 rsa = "0.9.8"
 sha1 = "0.10.6"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# rand 0.8 uses getrandom 0.2; enable the browser crypto.getRandomValues backend.
+getrandom = { version = "0.2.17", features = ["js"] }
