@@ -1,3 +1,159 @@
+use eagler_mod_api::{ManifestError, ModManifest};
+use wasmi::{
+    Config, Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder,
+    TypedFunc, Val,
+};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeLimits {
+    pub fuel_per_call: u64,
+    pub max_memory_bytes: usize,
+    pub max_module_bytes: usize,
+}
+
+impl Default for RuntimeLimits {
+    fn default() -> Self {
+        Self {
+            fuel_per_call: 1_000_000,
+            max_memory_bytes: 16 * 1024 * 1024,
+            max_module_bytes: 8 * 1024 * 1024,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ModHostState {
+    limits: StoreLimits,
+}
+
+#[derive(Debug)]
+pub enum ModLoadError {
+    InvalidManifest(ManifestError),
+    ModuleTooLarge { size: usize, limit: usize },
+    InvalidWasm(String),
+    Instantiation(String),
+    MissingTickExport(String),
+    FuelConfiguration(String),
+}
+
+#[derive(Debug)]
+pub enum ModExecutionError {
+    FuelConfiguration(String),
+    Trap(String),
+}
+
+/// A reusable Wasmi engine configured for isolated mod instances.
+#[derive(Debug)]
+pub struct ModRuntime {
+    api_version: u32,
+    limits: RuntimeLimits,
+    engine: Engine,
+}
+
+impl ModRuntime {
+    pub fn new(api_version: u32, limits: RuntimeLimits) -> Self {
+        let mut config = Config::default();
+        config.consume_fuel(true);
+        let engine = Engine::new(&config);
+        Self {
+            api_version,
+            limits,
+            engine,
+        }
+    }
+
+    /// Validates the manifest and creates an isolated Wasmi store for one mod.
+    ///
+    /// No WASI or ambient host imports are linked. A module can only import
+    /// functions deliberately added to this host in a later, capability-checked
+    /// ABI revision.
+    pub fn load(
+        &self,
+        manifest: &ModManifest,
+        wasm_bytes: &[u8],
+    ) -> Result<LoadedMod, ModLoadError> {
+        manifest
+            .validate_for(self.api_version)
+            .map_err(ModLoadError::InvalidManifest)?;
+
+        if wasm_bytes.len() > self.limits.max_module_bytes {
+            return Err(ModLoadError::ModuleTooLarge {
+                size: wasm_bytes.len(),
+                limit: self.limits.max_module_bytes,
+            });
+        }
+
+        let module = Module::new(&self.engine, wasm_bytes)
+            .map_err(|error| ModLoadError::InvalidWasm(error.to_string()))?;
+        let limits = StoreLimitsBuilder::new()
+            .memory_size(self.limits.max_memory_bytes)
+            .instances(1)
+            .memories(1)
+            .tables(1)
+            .build();
+        let state = ModHostState { limits };
+        let mut store = Store::new(&self.engine, state);
+        store.limiter(|state| &mut state.limits);
+
+        // Deliberately empty: filesystem, networking, clock, and other imports
+        // are not available unless a later ABI explicitly grants them.
+        let linker = Linker::<ModHostState>::new(&self.engine);
+        let instance = linker
+            .instantiate_and_start(&mut store, &module)
+            .map_err(|error| ModLoadError::Instantiation(error.to_string()))?;
+        let on_tick = instance
+            .get_typed_func::<(), ()>(&store, "on_tick")
+            .map_err(|error| ModLoadError::MissingTickExport(error.to_string()))?;
+
+        store
+            .set_fuel(self.limits.fuel_per_call)
+            .map_err(|error| ModLoadError::FuelConfiguration(error.to_string()))?;
+
+        Ok(LoadedMod {
+            manifest: manifest.clone(),
+            instance,
+            store,
+            on_tick,
+            fuel_per_call: self.limits.fuel_per_call,
+        })
+    }
+}
+
+/// A single mod instance. Each loaded mod owns its own Wasmi store and limits.
+#[derive(Debug)]
+pub struct LoadedMod {
+    manifest: ModManifest,
+    instance: Instance,
+    store: Store<ModHostState>,
+    on_tick: TypedFunc<(), ()>,
+    fuel_per_call: u64,
+}
+
+impl LoadedMod {
+    pub fn manifest(&self) -> &ModManifest {
+        &self.manifest
+    }
+
+    /// Executes one tick with a fresh deterministic fuel budget.
+    pub fn tick(&mut self) -> Result<(), ModExecutionError> {
+        self.store
+            .set_fuel(self.fuel_per_call)
+            .map_err(|error| ModExecutionError::FuelConfiguration(error.to_string()))?;
+        self.on_tick
+            .call(&mut self.store, ())
+            .map_err(|error| ModExecutionError::Trap(error.to_string()))
+    }
+
+    /// Reads an exported i32 global for diagnostics and test probes.
+    pub fn read_i32_export(&self, name: &str) -> Option<i32> {
+        let global = self.instance.get_global(&self.store, name)?;
+        match global.get(&self.store) {
+            Val::I32(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use eagler_mod_api::{Capability, ModManifest};
