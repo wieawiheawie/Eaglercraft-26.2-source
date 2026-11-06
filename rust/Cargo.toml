@@ -21,6 +21,7 @@ eagler-renderer = { path = "crates/renderer" }
 eagler-mod-api = { path = "crates/mod-api" }
 eagler-mod-runtime = { path = "crates/mod-runtime" }
 wasmi = { version = "2.0.0", default-features = false, features = ["std", "validate", "portable-dispatch", "prefer-btree-collections"] }
+parking_lot = "0.12.5"
 
 [profile.dev]
 opt-level = 1
