@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, io::{Read, Write}};
 
-use crate::{decode_chunk_with_light, ChunkDecodeError, DecodedChunk, WorldPacket};
+use crate::{decode_chunk_with_light, ChunkDecodeError, WorldPacket};
 
 use aes::{
     cipher::{BlockEncrypt, KeyInit},
@@ -425,10 +425,6 @@ impl MinecraftLoginSession {
             .pending_public_key
             .as_ref()
             .ok_or(LoginError::InvalidPacket("missing server public key"))?;
-        let challenge = self
-            .pending_challenge
-            .as_ref()
-            .ok_or(LoginError::InvalidPacket("missing server challenge"))?;
         let key = RsaPublicKey::from_public_key_der(public_key_der)
             .map_err(|error| LoginError::InvalidPublicKey(error.to_string()))?;
         self.send_encryption_response_with_secret(secret, key)
@@ -882,8 +878,9 @@ fn read_nonnegative_varint(bytes: &[u8], cursor: &mut usize) -> Result<i32, Logi
 }
 
 fn offline_uuid(username: &str) -> [u8; 16] {
-    let digest = md5::compute(format!("OfflinePlayer:{username}"));
-    let mut uuid = digest.0;
+    let digest = md5::Md5::digest(format!("OfflinePlayer:{username}").as_bytes());
+    let mut uuid = [0_u8; 16];
+    uuid.copy_from_slice(&digest);
     uuid[6] = (uuid[6] & 0x0f) | 0x30;
     uuid[8] = (uuid[8] & 0x3f) | 0x80;
     uuid
