@@ -333,7 +333,8 @@ impl WispSession {
         let mut packet = self.outbound_pool.pop().unwrap_or_default();
         packet.clear();
         if packet.capacity() < capacity {
-            packet.reserve(capacity - packet.capacity());
+            // Vec::reserve is relative to len, not current capacity.
+            packet.reserve(capacity);
         }
         packet
     }
@@ -475,6 +476,14 @@ mod tests {
         let mut tail = [0_u8; 8];
         assert_eq!(session.read_tcp(&mut tail), 4);
         assert_eq!(&tail[..4], b"raft");
+    }
+
+    #[test]
+    fn recycled_packet_buffer_grows_to_the_requested_capacity() {
+        let mut session = WispSession::new("mc.example.net", 25565).unwrap();
+        session.recycle_outbound(Vec::new());
+        let packet = session.take_packet_buffer(65_541);
+        assert!(packet.capacity() >= 65_541);
     }
 
     #[test]
