@@ -181,7 +181,7 @@ impl GpuRenderer {
             });
         }
         self.queue.submit([encoder.finish()]);
-        frame.present();
+        self.queue.present(frame);
         Ok(())
     }
 }
